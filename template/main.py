@@ -1,9 +1,7 @@
 #!/bin/env python
-###
-###
-###
-Author = 'Adam Grigolato'
-Version = '0'
-###
-###
-###
+#
+___author__ = 'Adam Grigolato'
+__version__ = '0'
+#IMPORTS
+
+#
