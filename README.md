@@ -1,31 +1,216 @@
-## Synopsis
+# sub: a delicious way to organize programs
 
-At the top of the file there should be a short introduction and/ or overview that explains **what** the project is. This description should match descriptions added for package managers (Gemspec, package.json, etc.)
+Sub is a model for setting up shell programs that use subcommands, like `git` or `rbenv` using bash. Making a sub does not require you to write shell scripts in bash, you can write subcommands in any scripting language you prefer.
 
-## Code Example
+A sub program is run at the command line using this style:
 
-Show what the library does as concisely as possible, developers should be able to figure out **how** your project solves their problem by looking at the code example. Make sure the API you are showing off is obvious, and that your code is short and concise.
+    $ [name of program] [subcommand] [(args)]
 
-## Motivation
+Here's some quick examples:
 
-A short description of the motivation behind the creation and maintenance of the project. This should explain **why** the project exists.
+    $ rbenv                    # prints out usage and subcommands
+    $ rbenv versions           # runs the "versions" subcommand
+    $ rbenv shell 1.9.3-p194   # runs the "shell" subcommand, passing "1.9.3-p194" as an argument
 
-## Installation
+Each subcommand maps to a separate, standalone executable program. Sub programs are laid out like so:
 
-Provide code examples and explanations of how to get the project.
+    .
+    ├── completions       # (optional) bash/zsh completions
+    ├── libexec           # where the main and subcommand executables are
+    └── share             # static data storage
 
-## API Reference
+## Subcommands
 
-Depending on the size of the project, if it is small and simple enough the reference docs can be added to the README. For medium size to larger projects it is important to at least provide a link to where the API reference docs live.
+Each subcommand executable does not necessarily need to be in bash. It can be any program, shell script, or even a symlink. It just needs to run.
 
-## Tests
+Here's an example of adding a new subcommand. Let's say your sub is named `rush`. Run:
 
-Describe and show how to run the tests with code examples.
+    touch libexec/rush-who
+    chmod a+x libexec/rush-who
 
-## Contributors
+Now open up your editor, and dump in:
 
-Let people know how they can dive into the project, include important links to things like issue trackers, irc, twitter accounts if applicable.
+``` bash
+#!/usr/bin/env bash
+set -e
+
+who
+```
+
+Of course, this is a simple example...but now `rush who` should work!
+
+    $ rush who
+    qrush     console  Sep 14 17:15 
+
+You can run *any* executable in the `libexec` directly, as long as it follows the `NAME-SUBCOMMAND` convention. Try out a Ruby script or your favorite language!
+
+## What's on your sub
+
+You get a few commands that come with your sub:
+
+* `commands`: Prints out every subcommand available
+* `completions`: Helps kick off subcommand autocompletion.
+* `help`: Document how to use each subcommand
+* `init`: Shows how to load your sub with autocompletions, based on your shell.
+* `shell`: Helps with calling subcommands that might be named the same as builtin/executables.
+
+If you ever need to reference files inside of your sub's installation, say to access a file in the `share` directory, your sub exposes the directory path in the environment, based on your sub name. For a sub named `rush-cli`, the variable name will be `_RUSH_CLI_ROOT`.  
+
+Here's an example subcommand you could drop into your `libexec` directory to show this in action: (make sure to correct the name!)
+
+``` bash
+#!/usr/bin/env bash
+set -e
+
+echo $_RUSH_CLI_ROOT
+```
+
+You can also use this environment variable to call other commands inside of your `libexec` directly. Composition of this type very much encourages reuse of small scripts, and keeps scripts doing *one* thing simply.
+
+## Self-documenting subcommands
+
+Each subcommand can opt into self-documentation, which allows the subcommand to provide information when `sub` and `sub help [SUBCOMMAND]` is run.
+
+This is all done by adding a few magic comments. Here's an example from `rush who` (also see `sub commands` for another example):
+
+``` bash
+#!/usr/bin/env bash
+# Usage: sub who
+# Summary: Check who's logged in
+# Help: This will print out when you run `sub help who`.
+# You can have multiple lines even!
+#
+#    Show off an example indented
+#
+# And maybe start off another one?
+
+set -e
+
+who
+```
+
+Now, when you run `sub`, the "Summary" magic comment will now show up:
+
+    usage: sub <command> [<args>]
+
+    Some useful sub commands are:
+       commands               List all sub commands
+       who                    Check who's logged in
+
+And running `sub help who` will show the "Usage" magic comment, and then the "Help" comment block:
+
+    Usage: sub who
+
+    This will print out when you run `sub help who`.
+    You can have multiple lines even!
+
+       Show off an example indented
+
+    And maybe start off another one?
+
+That's not all you get by convention with sub...
+
+## Autocompletion
+
+Your sub loves autocompletion. It's the mustard, mayo, or whatever topping you'd like that day for your commands. Just like real toppings, you have to opt into them! Sub provides two kinds of autocompletion:
+
+1. Automatic autocompletion to find subcommands (What can this sub do?)
+2. Opt-in autocompletion of potential arguments for your subcommands (What can this subcommand do?)
+
+Opting into autocompletion of subcommands requires that you add a magic comment of (make sure to replace with your sub's name!):
+
+    # Provide YOUR_SUB_NAME completions
+
+and then your script must support parsing of a flag: `--complete`. Here's an example from rbenv, namely `rbenv whence`:
+
+``` bash
+#!/usr/bin/env bash
+set -e
+[ -n "$RBENV_DEBUG" ] && set -x
+
+# Provide rbenv completions
+if [ "$1" = "--complete" ]; then
+  echo --path
+  exec rbenv shims --short
+fi
+
+# lots more bash...
+```
+
+Passing the `--complete` flag to this subcommand short circuits the real command, and then runs another subcommand instead. The output from your subcommand's `--complete` run is sent to your shell's autocompletion handler for you, and you don't ever have to once worry about how any of that works!
+
+Run the `init` subcommand after you've prepared your sub to get your sub loading automatically in your shell.
+
+## Sourcing commands
+
+Sometimes, you want to source a command instead of executing it in a
+subshell. This happen in cases like you want to set environment
+variables, or navigate to a directory.
+
+You can tell sub to source environments by adding a SOURCE comment in your script:
+
+    # SOURCE
+
+So if you wanted to create something that navigated you workspace:
+
+``` bash
+#!/usr/bin/env bash
+# SOURCE
+# Usage: sub w {directoryname}
+# Summary: A quick way to navigate to a folder inside your "workspace" location. 
+
+if [ ! -d ~/workspace ]; then
+    mkdir -p ~/workspace
+fi
+
+# provide sub completions
+if [ "$1" == "--complete" ]; then  
+    ls ~/workspace
+    exit
+fi
+cd ~/workspace/$1
+```
+
+## Shortcuts
+
+Creating shortcuts for commands is easy, just symlink the shorter version you'd like to run inside of your `libexec` directory.
+
+Let's say we want to shorten up our `rush who` to `rush w`. Just make a symlink!
+
+    cd libexec
+    ln -s rush-who rush-w
+
+Now, `rush w` should run `libexec/rush-who`, and save you mere milliseconds of typing every day!
+
+## Prepare your sub
+
+Clone this repo:
+
+    git clone git://github.com/zillow/sub.git [name of your sub]
+    cd [name of your sub]
+    ./prepare.sh [name of your sub]
+
+The prepare script will run you through the steps for making your own sub. Also, don't call it `sub`, by the way! Give it a better name.
+
+## Install your sub
+
+So you've prepared your own sub, now how do you use it? Here's one way you could install your sub in your `$HOME` directory:
+
+    cd
+    git clone [YOUR GIT HOST URL]/sub.git .sub
+
+For bash users:
+
+    echo 'temp=`pwd`; cd $HOME/.sub/libexec && . sub-init && cd $tmp' >> ~/.bash_profile
+    exec bash
+
+For zsh users:
+
+    echo 'temp=`pwd`; cd $HOME/.sub/libexec && . sub-init && cd $tmp' >> ~/.zshenv
+    source ~/.zshenv
+
+You could also install your sub in a different directory, say `/usr/local`. This is just one way you could provide a way to install your sub.
 
 ## License
 
-A short snippet describing the license (MIT, Apache, etc.)
+MIT. See `LICENSE`.
